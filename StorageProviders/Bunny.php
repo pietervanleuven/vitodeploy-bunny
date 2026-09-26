@@ -2,6 +2,7 @@
 
 namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\StorageProviders;
 
+use App\DTOs\DynamicField;
 use App\Models\Server;
 use App\SSH\Storage\Storage;
 use App\StorageProviders\AbstractStorageProvider;
@@ -57,10 +58,41 @@ class Bunny extends AbstractStorageProvider
         ];
     }
 
-    public function connect(): bool
+    /**
+     * @return array<int, DynamicField>
+     */
+    public static function editFields(): array
     {
-        $credentials = $this->storageProvider->credentials;
+        return [
+            DynamicField::make('storage_zone')
+                ->text()
+                ->label('Storage Zone Name'),
+            DynamicField::make('access_key')
+                ->passwordWithToggle()
+                ->label('Access Key')
+                ->description('Leave empty to keep the current access key'),
+            DynamicField::make('endpoint')
+                ->select()
+                ->options(self::ENDPOINTS)
+                ->label('Endpoint'),
+            DynamicField::make('path')
+                ->text()
+                ->label('Path'),
+        ];
+    }
 
+    protected function editableFields(): array
+    {
+        return ['storage_zone', 'endpoint', 'path'];
+    }
+
+    protected function secretFields(): array
+    {
+        return ['access_key'];
+    }
+
+    public function connect(array $credentials): bool
+    {
         try {
             $response = Http::withHeaders([
                 'AccessKey' => $credentials['access_key'],
