@@ -26,7 +26,7 @@ class BunnyStorage extends AbstractStorage
         );
 
         if (! str_contains($output, 'Upload successful')) {
-            Log::error('Failed to upload to Bunny Storage', ['output' => $output]);
+            Log::error('Failed to upload to Bunny Storage', ['http_code' => $this->httpCodeFrom($output)]);
             throw new SSHCommandError('Failed to upload to Bunny Storage');
         }
 
@@ -50,7 +50,7 @@ class BunnyStorage extends AbstractStorage
         );
 
         if (! str_contains($output, 'Download successful')) {
-            Log::error('Failed to download from Bunny Storage', ['output' => $output]);
+            Log::error('Failed to download from Bunny Storage', ['http_code' => $this->httpCodeFrom($output)]);
             throw new SSHCommandError('Failed to download from Bunny Storage');
         }
     }
@@ -77,9 +77,19 @@ class BunnyStorage extends AbstractStorage
         );
 
         if (! str_contains($output, 'Delete successful')) {
-            Log::error('Failed to delete from Bunny Storage', ['output' => $output]);
+            Log::error('Failed to delete from Bunny Storage', ['http_code' => $this->httpCodeFrom($output)]);
             throw new SSHCommandError('Failed to delete from Bunny Storage');
         }
+    }
+
+    /**
+     * The HTTP status reported by a transfer script, so a failure can be
+     * logged without the raw command output (which Vito already keeps in
+     * the server log and which may echo provider or backup details).
+     */
+    private function httpCodeFrom(string $output): ?string
+    {
+        return preg_match('/HTTP code (\d{3})/', $output, $matches) === 1 ? $matches[1] : null;
     }
 
     /**

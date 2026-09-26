@@ -138,7 +138,7 @@ class Bunny extends AbstractDNSProvider
                 ]);
 
                 if (! $response->successful()) {
-                    Log::error('Failed to fetch Bunny DNS zones', ['page' => $page, 'response' => $response->json()]);
+                    Log::error('Failed to fetch Bunny DNS zones', ['page' => $page, 'status' => $response->status(), 'message' => $this->errorMessage($response->json())]);
                     break;
                 }
 
@@ -166,7 +166,7 @@ class Bunny extends AbstractDNSProvider
             $response = $this->getClient()->get("dnszone/{$domainId}");
 
             if (! $response->successful()) {
-                Log::error('Failed to fetch Bunny DNS zone', ['domainId' => $domainId, 'response' => $response->json()]);
+                Log::error('Failed to fetch Bunny DNS zone', ['domainId' => $domainId, 'status' => $response->status(), 'message' => $this->errorMessage($response->json())]);
 
                 return [];
             }
@@ -201,7 +201,7 @@ class Bunny extends AbstractDNSProvider
         }
 
         if (! $response->successful()) {
-            Log::error('Failed to fetch Bunny DNS records', ['domainId' => $domainId, 'response' => $response->json()]);
+            Log::error('Failed to fetch Bunny DNS records', ['domainId' => $domainId, 'status' => $response->status(), 'message' => $this->errorMessage($response->json())]);
             throw new \RuntimeException('Failed to fetch DNS records: '.$this->errorMessage($response->json()));
         }
 
@@ -225,7 +225,7 @@ class Bunny extends AbstractDNSProvider
             $response = $this->getClient()->put("dnszone/{$domainId}/records", $this->buildPayload($domainId, $recordData));
 
             if (! $response->successful()) {
-                Log::error('Failed to create Bunny DNS record', ['domainId' => $domainId, 'input' => $recordData, 'response' => $response->json()]);
+                Log::error('Failed to create Bunny DNS record', ['domainId' => $domainId, 'status' => $response->status(), 'message' => $this->errorMessage($response->json())]);
                 throw ValidationException::withMessages(['record' => 'Failed to create DNS record: '.$this->errorMessage($response->json())]);
             }
 
@@ -258,7 +258,7 @@ class Bunny extends AbstractDNSProvider
             $response = $this->getClient()->post("dnszone/{$domainId}/records/{$recordId}", $this->buildPayload($domainId, $recordData));
 
             if (! $response->successful()) {
-                Log::error('Failed to update Bunny DNS record', ['domainId' => $domainId, 'recordId' => $recordId, 'input' => $recordData, 'response' => $response->json()]);
+                Log::error('Failed to update Bunny DNS record', ['domainId' => $domainId, 'recordId' => $recordId, 'status' => $response->status(), 'message' => $this->errorMessage($response->json())]);
                 throw ValidationException::withMessages(['record' => 'Failed to update DNS record: '.$this->errorMessage($response->json())]);
             }
 
@@ -283,7 +283,7 @@ class Bunny extends AbstractDNSProvider
             $response = $this->getClient()->delete("dnszone/{$domainId}/records/{$recordId}");
 
             if (! $response->successful()) {
-                Log::error('Failed to delete Bunny DNS record', ['domainId' => $domainId, 'recordId' => $recordId, 'response' => $response->json()]);
+                Log::error('Failed to delete Bunny DNS record', ['domainId' => $domainId, 'recordId' => $recordId, 'status' => $response->status(), 'message' => $this->errorMessage($response->json())]);
 
                 return false;
             }
