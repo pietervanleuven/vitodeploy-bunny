@@ -141,9 +141,17 @@ class Bunny extends AbstractDNSProvider
         }
     }
 
+    /**
+     * @throws \RuntimeException when the records cannot be fetched
+     */
     public function getRecords(string $domainId): array
     {
-        $response = $this->getClient()->get("dnszone/{$domainId}");
+        try {
+            $response = $this->getClient()->get("dnszone/{$domainId}");
+        } catch (Throwable $e) {
+            Log::error('Bunny DNS getRecords exception', ['domainId' => $domainId, 'error' => $e->getMessage()]);
+            throw new \RuntimeException('Failed to fetch DNS records: could not reach the Bunny API', 0, $e);
+        }
 
         if (! $response->successful()) {
             Log::error('Failed to fetch Bunny DNS records', ['domainId' => $domainId, 'response' => $response->json()]);
