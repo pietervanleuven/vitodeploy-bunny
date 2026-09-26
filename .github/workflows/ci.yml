@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  PLUGIN_PATH: app/Vito/Plugins/Pietervanleuven/VitodeployBunny
+
+jobs:
+  code-style:
+    name: Code style (Pint)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Check code style
+        run: ./vendor/bin/pint --test
+
+  vito:
+    name: Tests and static analysis (Vito ${{ matrix.vito-ref }})
+    runs-on: ubuntu-22.04
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pinned release: this is what the plugin is verified against.
+          - vito-ref: "4.1.1"
+            experimental: false
+          # Moving branch: early warning for upstream changes.
+          - vito-ref: "4.x"
+            experimental: true
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          path: plugin
+
+      - name: Checkout VitoDeploy
+        uses: actions/checkout@v4
+        with:
+          repository: vitodeploy/vito
+          ref: ${{ matrix.vito-ref }}
+          path: vito
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: ftp, intl, zip, sqlite3, pdo_sqlite
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vito/vendor
+          key: composer-${{ runner.os }}-${{ matrix.vito-ref }}-${{ hashFiles('vito/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-${{ matrix.vito-ref }}-
+
+      - name: Install VitoDeploy dependencies
+        working-directory: vito
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Install the plugin into VitoDeploy
+        run: |
+          mkdir -p "vito/${PLUGIN_PATH}"
+          rsync -a --exclude .git --exclude vendor plugin/ "vito/${PLUGIN_PATH}/"
+
+      - name: Prepare the application
+        working-directory: vito
+        run: |
+          touch .env
+          php artisan key:generate
+          touch storage/database-test.sqlite
+
+      - name: Static analysis (PHPStan)
+        working-directory: vito
+        run: ./vendor/bin/phpstan analyse -c "${PLUGIN_PATH}/phpstan.neon" --no-progress --memory-limit=1G
+
+      - name: Run tests
+        working-directory: vito
+        run: php artisan test "${PLUGIN_PATH}/tests"
