@@ -12,6 +12,7 @@ use App\Models\StorageProvider;
 use App\Models\User;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\DNSProviders\Bunny as BunnyDNS;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Plugin;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SSH\Storage\BunnyStorage;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\StorageProviders\Bunny as BunnyStorageProvider;
 use Illuminate\Support\Facades\View;
 
@@ -26,7 +27,7 @@ use Illuminate\Support\Facades\View;
  */
 trait InteractsWithBunnyPlugin
 {
-    protected function bootPlugin(): void
+    public function bootPlugin(): void
     {
         (new Plugin)->boot();
 
@@ -38,7 +39,7 @@ trait InteractsWithBunnyPlugin
     /**
      * @return array<string, string>
      */
-    protected function bunnyStorageCredentials(array $overrides = []): array
+    public function bunnyStorageCredentials(array $overrides = []): array
     {
         return array_merge([
             'storage_zone' => 'vito-backups',
@@ -52,7 +53,7 @@ trait InteractsWithBunnyPlugin
      * @param  array<string, mixed>  $credentials
      * @param  array<string, mixed>  $attributes
      */
-    protected function bunnyStorageProvider(array $credentials = [], array $attributes = []): StorageProvider
+    public function bunnyStorageProvider(array $credentials = [], array $attributes = []): StorageProvider
     {
         return StorageProvider::factory()->create(array_merge([
             'user_id' => $this->user->id,
@@ -66,7 +67,7 @@ trait InteractsWithBunnyPlugin
     /**
      * @param  array<string, mixed>  $attributes
      */
-    protected function bunnyDnsProvider(?User $user = null, ?int $projectId = null, string $apiKey = 'dns-api-key', array $attributes = []): DNSProvider
+    public function bunnyDnsProvider(?User $user = null, ?int $projectId = null, string $apiKey = 'dns-api-key', array $attributes = []): DNSProvider
     {
         return DNSProvider::factory()->create(array_merge([
             'user_id' => ($user ?? $this->user)->id,
@@ -79,9 +80,19 @@ trait InteractsWithBunnyPlugin
     }
 
     /**
+     * The SSH storage handler for a freshly created Bunny storage provider.
+     *
+     * @param  array<string, mixed>  $credentials
+     */
+    public function bunnyStorage(array $credentials = []): BunnyStorage
+    {
+        return new BunnyStorage($this->server, $this->bunnyStorageProvider($credentials));
+    }
+
+    /**
      * Create a backup + backup file that uses the given (Bunny) storage provider.
      */
-    protected function bunnyBackupFile(StorageProvider $storage, BackupType $type = BackupType::DATABASE, string $name = 'backup-20260101000000', BackupFileStatus $status = BackupFileStatus::CREATED): BackupFile
+    public function bunnyBackupFile(StorageProvider $storage, BackupType $type = BackupType::DATABASE, string $name = 'backup-20260101000000', BackupFileStatus $status = BackupFileStatus::CREATED): BackupFile
     {
         $attributes = [
             'server_id' => $this->server->id,

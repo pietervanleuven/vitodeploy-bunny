@@ -1,6 +1,7 @@
+{{-- Every value is a single shell argument via escapeshellarg(); {{ }} would HTML-encode the quoting. --}}
 RESPONSE_FILE=$(mktemp)
 
-HTTP_CODE=$(curl -sS -o "$RESPONSE_FILE" -w "%{http_code}" -T "{{ $src }}" -H "AccessKey: {{ $accessKey }}" "https://{{ $endpoint }}/{{ $zone }}/{{ $dest }}")
+HTTP_CODE=$(curl -sS -o "$RESPONSE_FILE" -w "%{http_code}" -T {!! escapeshellarg($src) !!} -H {!! escapeshellarg('AccessKey: '.$accessKey) !!} {!! escapeshellarg($url) !!} || true)
 
 cat "$RESPONSE_FILE"
 echo ""

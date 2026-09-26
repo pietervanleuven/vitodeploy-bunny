@@ -5,6 +5,8 @@ namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SSH\Storage;
 use App\Exceptions\SSHCommandError;
 use App\Exceptions\SSHError;
 use App\SSH\Storage\AbstractStorage;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Plugin;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\StorageProviders\Bunny;
 use Illuminate\Support\Facades\Log;
 
 class BunnyStorage extends AbstractStorage
@@ -15,10 +17,10 @@ class BunnyStorage extends AbstractStorage
     public function upload(string $src, string $dest): array
     {
         $output = $this->server->ssh()->exec(
-            app('view')->make('vitodeploy-bunny::storage.upload', [
+            app('view')->make(Plugin::VIEW_NAMESPACE.'::storage.upload', [
                 'src' => $src,
-                'dest' => $this->preparePath($dest !== '' ? $dest : $this->defaultPath($src)),
-                ...$this->credentialVars(),
+                'url' => $this->url($dest !== '' ? $dest : $this->defaultPath($src)),
+                'accessKey' => $this->credentials()['access_key'],
             ]),
             'upload-to-bunny-storage'
         );
@@ -39,10 +41,10 @@ class BunnyStorage extends AbstractStorage
     public function download(string $src, string $dest): void
     {
         $output = $this->server->ssh()->exec(
-            app('view')->make('vitodeploy-bunny::storage.download', [
-                'src' => $this->preparePath($src !== '' ? $src : $this->defaultPath($dest)),
+            app('view')->make(Plugin::VIEW_NAMESPACE.'::storage.download', [
+                'url' => $this->url($src !== '' ? $src : $this->defaultPath($dest)),
                 'dest' => $dest,
-                ...$this->credentialVars(),
+                'accessKey' => $this->credentials()['access_key'],
             ]),
             'download-from-bunny-storage'
         );
@@ -68,9 +70,9 @@ class BunnyStorage extends AbstractStorage
         }
 
         $output = $this->server->ssh()->exec(
-            app('view')->make('vitodeploy-bunny::storage.delete-file', [
-                'src' => $this->preparePath($src),
-                ...$this->credentialVars(),
+            app('view')->make(Plugin::VIEW_NAMESPACE.'::storage.delete-file', [
+                'url' => $this->url($src),
+                'accessKey' => $this->credentials()['access_key'],
             ]),
             'delete-from-bunny-storage'
         );
@@ -87,10 +89,29 @@ class BunnyStorage extends AbstractStorage
      */
     private function defaultPath(string $localPath): string
     {
-        $prefix = trim((string) ($this->storageProvider->credentials['path'] ?? ''), '/');
+        $prefix = trim($this->credentials()['path'], '/');
         $name = basename($localPath);
 
         return $prefix === '' ? $name : $prefix.'/'.$name;
+    }
+
+    /**
+     * The full storage API URL for a remote path. Every component is
+     * validated or sanitised here; the Blade scripts wrap the result in
+     * escapeshellarg() so it always reaches curl as a single argument.
+     *
+     * @throws SSHCommandError
+     */
+    private function url(string $path): string
+    {
+        $credentials = $this->credentials();
+
+        return sprintf(
+            'https://%s/%s/%s',
+            $credentials['endpoint'],
+            $credentials['storage_zone'],
+            $this->preparePath($path)
+        );
     }
 
     private function preparePath(string $path): string
@@ -102,14 +123,38 @@ class BunnyStorage extends AbstractStorage
     }
 
     /**
-     * @return array<string, string>
+     * The provider credentials, validated so that only well-formed values
+     * are ever interpolated into a command.
+     *
+     * @return array{endpoint: string, storage_zone: string, access_key: string, path: string}
+     *
+     * @throws SSHCommandError
      */
-    private function credentialVars(): array
+    private function credentials(): array
     {
+        $credentials = $this->storageProvider->credentials;
+
+        $endpoint = (string) ($credentials['endpoint'] ?? '');
+        $zone = (string) ($credentials['storage_zone'] ?? '');
+        $accessKey = (string) ($credentials['access_key'] ?? '');
+
+        if (! in_array($endpoint, Bunny::ENDPOINTS, true)) {
+            throw new SSHCommandError('Bunny Storage endpoint is not a known storage endpoint');
+        }
+
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $zone) !== 1) {
+            throw new SSHCommandError('Bunny Storage zone name contains unsupported characters');
+        }
+
+        if ($accessKey === '') {
+            throw new SSHCommandError('Bunny Storage access key is missing');
+        }
+
         return [
-            'endpoint' => $this->storageProvider->credentials['endpoint'],
-            'zone' => $this->storageProvider->credentials['storage_zone'],
-            'accessKey' => $this->storageProvider->credentials['access_key'],
+            'endpoint' => $endpoint,
+            'storage_zone' => $zone,
+            'access_key' => $accessKey,
+            'path' => (string) ($credentials['path'] ?? ''),
         ];
     }
 }
