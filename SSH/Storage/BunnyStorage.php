@@ -117,16 +117,31 @@ class BunnyStorage extends AbstractStorage
             'https://%s/%s/%s',
             $credentials['endpoint'],
             $credentials['storage_zone'],
-            $this->preparePath($path)
+            $this->encodePath($path)
         );
     }
 
-    private function preparePath(string $path): string
+    /**
+     * Percent-encode every path segment so any file name round-trips to
+     * the storage API unchanged (replacing characters would let two
+     * different names collide on the same remote object).
+     *
+     * @throws SSHCommandError for relative segments
+     */
+    private function encodePath(string $path): string
     {
-        $path = ltrim(trim($path), '/');
-        $path = preg_replace('/[^a-zA-Z0-9\-_\.\/]/', '_', $path);
+        $segments = array_values(array_filter(
+            explode('/', trim($path)),
+            fn (string $segment): bool => $segment !== ''
+        ));
 
-        return preg_replace('/\/+/', '/', (string) $path);
+        foreach ($segments as $segment) {
+            if ($segment === '.' || $segment === '..') {
+                throw new SSHCommandError('Bunny Storage path may not contain relative segments');
+            }
+        }
+
+        return implode('/', array_map(rawurlencode(...), $segments));
     }
 
     /**

@@ -185,3 +185,41 @@ test('delete treats a missing remote file as success', function (): void {
     expect($run['exit'])->toBe(0)
         ->and($run['output'])->toContain('Delete successful');
 });
+
+test('remote paths are percent-encoded per segment', function (string $path, string $expected): void {
+    SSH::fake('Delete successful');
+
+    $this->bunnyStorage()->delete($path);
+
+    $run = $this->runLastScript('200');
+
+    expect(end($run['args']))->toBe('https://storage.bunnycdn.com/vito-backups/'.$expected);
+})->with([
+    'spaces' => ['backups/my site/db backup.sql.gz', 'backups/my%20site/db%20backup.sql.gz'],
+    'unicode' => ['backups/café.tar.gz', 'backups/caf%C3%A9.tar.gz'],
+    'reserved characters' => ['a&b/c?d=e#f.tar.gz', 'a%26b/c%3Fd%3De%23f.tar.gz'],
+    'leading and repeated slashes' => ['//backups///x.tar.gz/', 'backups/x.tar.gz'],
+    'plain names untouched' => ['backups/site-1_2026.tar.gz', 'backups/site-1_2026.tar.gz'],
+]);
+
+test('different file names never map to the same remote path', function (): void {
+    SSH::fake('Delete successful');
+    $storage = $this->bunnyStorage();
+
+    $storage->delete('backups/a b.tar.gz');
+    $first = end($this->runLastScript('200')['args']);
+
+    $storage->delete('backups/a_b.tar.gz');
+    $second = end($this->runLastScript('200')['args']);
+
+    expect($first)->not->toBe($second);
+});
+
+test('relative path segments are rejected', function (string $path): void {
+    SSH::fake();
+
+    expect(fn () => $this->bunnyStorage()->delete($path))
+        ->toThrow(SSHCommandError::class, 'relative');
+
+    expect(SSH::getExecutedCommands())->toBeEmpty();
+})->with(['../etc/passwd', 'backups/../../x', './x', 'backups/./x']);
