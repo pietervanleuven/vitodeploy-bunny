@@ -223,3 +223,41 @@ test('relative path segments are rejected', function (string $path): void {
 
     expect(SSH::getExecutedCommands())->toBeEmpty();
 })->with(['../etc/passwd', 'backups/../../x', './x', 'backups/./x']);
+
+test('the scripts run curl with fail, retry and timeout flags', function (string $operation): void {
+    SSH::fake(match ($operation) {
+        'upload' => 'Upload successful',
+        'download' => 'Download successful',
+        default => 'Delete successful',
+    });
+    $storage = $this->bunnyStorage();
+
+    match ($operation) {
+        'upload' => $storage->upload('/home/vito/backup.sql.gz', 'backups/backup.sql.gz'),
+        'download' => $storage->download('backups/backup.sql.gz', '/home/vito/backup.sql.gz'),
+        default => $storage->delete('backups/backup.sql.gz'),
+    };
+
+    $args = $this->runLastScript($operation === 'upload' ? '201' : '200')['args'];
+
+    expect($args)->toContain('--fail')
+        ->and($this->curlArg($args, '--connect-timeout'))->toBe('30')
+        ->and($this->curlArg($args, '--retry'))->toBe('3')
+        ->and($this->curlArg($args, '--retry-delay'))->toBe('5');
+
+    if ($operation !== 'delete') {
+        expect($this->curlArg($args, '--speed-limit'))->toBe('1024')
+            ->and($this->curlArg($args, '--speed-time'))->toBe('120');
+    }
+})->with(['upload', 'download', 'delete']);
+
+test('a download that never connects fails and leaves no partial file', function (): void {
+    SSH::fake('Download successful');
+
+    $this->bunnyStorage()->download('backups/backup.sql.gz', '/home/vito/backup.sql.gz');
+
+    $run = $this->runLastScript('000');
+
+    expect($run['exit'])->not->toBe(0)
+        ->and($run['output'])->toContain('Download failed with HTTP code 000');
+});
