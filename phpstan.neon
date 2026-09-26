@@ -1,0 +1,19 @@
+# Static analysis for the plugin.
+#
+# The plugin only resolves against a VitoDeploy checkout, so run this from the
+# Vito root after copying the plugin to app/Vito/Plugins/Pietervanleuven/VitodeployBunny:
+#
+#   ./vendor/bin/phpstan analyse -c app/Vito/Plugins/Pietervanleuven/VitodeployBunny/phpstan.neon
+#
+# %rootDir% is vendor/phpstan/phpstan inside that checkout, so the Larastan
+# extension is picked up from Vito's own vendor directory.
+includes:
+    - %rootDir%/../../larastan/larastan/extension.neon
+
+parameters:
+    level: 5
+    paths:
+        - .
+    excludePaths:
+        - vendor
+        - tests

@@ -1,0 +1,64 @@
+{
+    "$schema": "https://raw.githubusercontent.com/vitodeploy/plugins/main/schema/manifest.schema.json",
+    "name": "pietervanleuven/vitodeploy-bunny",
+    "description": "Bunny.net integration for VitoDeploy: DNS provider, Edge Storage backups and CDN cache purging",
+    "version": "0.1.0",
+    "type": "vito-plugin",
+    "license": "MIT",
+    "keywords": [
+        "vitodeploy",
+        "vitodeploy-plugin",
+        "bunny",
+        "bunny.net",
+        "dns",
+        "storage",
+        "cdn"
+    ],
+    "authors": [
+        {
+            "name": "Pieter Van Leuven",
+            "homepage": "https://github.com/pietervanleuven"
+        }
+    ],
+    "require": {
+        "php": "^8.4"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\Vito\\Plugins\\Pietervanleuven\\VitodeployBunny\\": ""
+        },
+        "exclude-from-classmap": [
+            "/tests/"
+        ]
+    },
+    "scripts": {
+        "lint": "pint",
+        "lint:test": "pint --test"
+    },
+    "extra": {
+        "vito": {
+            "name": "Bunny.net",
+            "categories": [
+                "dns",
+                "storage",
+                "cdn"
+            ],
+            "homepage": "https://github.com/pietervanleuven/vitodeploy-bunny",
+            "repository": "https://github.com/pietervanleuven/vitodeploy-bunny",
+            "author": {
+                "name": "Pieter Van Leuven",
+                "github": "pietervanleuven"
+            },
+            "official": false,
+            "min_vito_version": "4.0.0"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
