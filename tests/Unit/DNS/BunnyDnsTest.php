@@ -176,3 +176,47 @@ test('create record returns the created record', function (): void {
         && $request['Value'] === '203.0.113.10'
         && $request['Ttl'] === 300);
 });
+
+test('get domains follows pagination until there are no more items', function (): void {
+    Http::fake([
+        'api.bunny.net/dnszone*' => Http::sequence()
+            ->push(['Items' => [bunnyZone(1, 'one.com'), bunnyZone(2, 'two.com')], 'CurrentPage' => 1, 'HasMoreItems' => true], 200)
+            ->push(['Items' => [bunnyZone(3, 'three.com')], 'CurrentPage' => 2, 'HasMoreItems' => false], 200),
+    ]);
+
+    $domains = $this->dns->getDomains();
+
+    expect(collect($domains)->pluck('name')->all())->toBe(['one.com', 'two.com', 'three.com']);
+
+    Http::assertSentCount(2);
+    Http::assertSentInOrder([
+        fn (Request $request) => str_contains($request->url(), 'page=1') && str_contains($request->url(), 'perPage=1000'),
+        fn (Request $request) => str_contains($request->url(), 'page=2') && str_contains($request->url(), 'perPage=1000'),
+    ]);
+});
+
+test('get domains requests a single page when the api does not report more items', function (): void {
+    Http::fake(['api.bunny.net/dnszone*' => Http::response(['Items' => [bunnyZone(1, 'one.com')]], 200)]);
+
+    expect(collect($this->dns->getDomains())->pluck('name')->all())->toBe(['one.com']);
+
+    Http::assertSentCount(1);
+});
+
+test('get domains keeps the pages it fetched when a later page fails', function (): void {
+    Http::fake([
+        'api.bunny.net/dnszone*' => Http::sequence()
+            ->push(['Items' => [bunnyZone(1, 'one.com')], 'HasMoreItems' => true], 200)
+            ->push(['Message' => 'boom'], 500),
+    ]);
+
+    expect(collect($this->dns->getDomains())->pluck('name')->all())->toBe(['one.com']);
+});
+
+test('get domains stops paging when a page claims more items but is empty', function (): void {
+    Http::fake(['api.bunny.net/dnszone*' => Http::response(['Items' => [], 'HasMoreItems' => true], 200)]);
+
+    expect($this->dns->getDomains())->toBe([]);
+
+    Http::assertSentCount(1);
+});

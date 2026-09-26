@@ -14,6 +14,16 @@ class Bunny extends AbstractDNSProvider
     private const string API_BASE_URL = 'https://api.bunny.net/';
 
     /**
+     * Bunny's maximum page size for zone listings.
+     */
+    private const int ZONES_PER_PAGE = 1000;
+
+    /**
+     * Safety cap so a misbehaving API can never keep us paging forever.
+     */
+    private const int MAX_ZONE_PAGES = 100;
+
+    /**
      * Bunny's API represents record types as integers.
      *
      * @var array<int, string>
@@ -102,28 +112,37 @@ class Bunny extends AbstractDNSProvider
 
     public function getDomains(): array
     {
+        $zones = [];
+        $page = 1;
+
         try {
-            $response = $this->getClient()->get('dnszone', [
-                'page' => 1,
-                'perPage' => 1000,
-            ]);
+            do {
+                $response = $this->getClient()->get('dnszone', [
+                    'page' => $page,
+                    'perPage' => self::ZONES_PER_PAGE,
+                ]);
 
-            if (! $response->successful()) {
-                Log::error('Failed to fetch Bunny DNS zones', ['response' => $response->json()]);
+                if (! $response->successful()) {
+                    Log::error('Failed to fetch Bunny DNS zones', ['page' => $page, 'response' => $response->json()]);
+                    break;
+                }
 
-                return [];
-            }
+                $json = $response->json();
+                $items = $this->listFrom($json, 'Items', 'zones');
+                array_push($zones, ...$items);
 
-            return collect($this->listFrom($response->json(), 'Items', 'zones'))
-                ->map(fn (mixed $zone): ?array => is_array($zone) ? $this->formatZone($zone) : null)
-                ->filter()
-                ->values()
-                ->toArray();
+                $hasMore = $items !== [] && is_array($json) && ($json['HasMoreItems'] ?? false) === true;
+                $page++;
+            } while ($hasMore && $page <= self::MAX_ZONE_PAGES);
         } catch (Throwable $e) {
-            Log::error('Bunny DNS getDomains exception', ['error' => $e->getMessage()]);
-
-            return [];
+            Log::error('Bunny DNS getDomains exception', ['page' => $page, 'error' => $e->getMessage()]);
         }
+
+        return collect($zones)
+            ->map(fn (mixed $zone): ?array => is_array($zone) ? $this->formatZone($zone) : null)
+            ->filter()
+            ->values()
+            ->toArray();
     }
 
     public function getDomain(string $domainId): array
