@@ -209,20 +209,4 @@ class BunnyApi
     {
         return Crypt::encryptString($apiKey);
     }
-
-    public static function connectedDnsProviderKey(?int $projectId = null): ?string
-    {
-        /** @var ?DNSProvider $dnsProvider */
-        $dnsProvider = DNSProvider::query()
-            ->where('provider', BunnyDNS::id())
-            ->where('connected', true)
-            ->when($projectId !== null, function ($query) use ($projectId) {
-                $query->where(function ($query) use ($projectId) {
-                    $query->whereNull('project_id')->orWhere('project_id', $projectId);
-                });
-            })
-            ->first();
-
-        return $dnsProvider?->credentials['api_key'] ?? null;
-    }
 }

@@ -6,6 +6,7 @@ use App\Models\Site;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
 use App\WorkflowActions\AbstractWorkflowAction;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
 
 class PurgeCache extends AbstractWorkflowAction
@@ -31,29 +32,35 @@ class PurgeCache extends AbstractWorkflowAction
 
     public function run(array $input): array
     {
+        // Outputs of earlier workflow actions are merged into the input;
+        // only read the keys this action declares.
+        $input = Arr::only($input, array_keys($this->inputs()));
+
         Validator::make($input, [
             'site_id' => ['nullable', 'integer', 'exists:sites,id'],
-            'pull_zone_id' => ['nullable', 'integer', 'required_without_all:site_id,url'],
-            'api_key' => ['nullable', 'string'],
-            'url' => ['nullable', 'url'],
+            'pull_zone_id' => ['nullable', 'integer', 'min:1', 'required_without_all:site_id,url'],
+            'api_key' => ['nullable', 'string', 'max:255'],
+            'url' => ['nullable', 'url', 'max:2048'],
         ])->validate();
 
-        $apiKey = $input['api_key'] ?? null;
-        $pullZoneId = $input['pull_zone_id'] ?? null;
+        $apiKey = isset($input['api_key']) && $input['api_key'] !== '' ? (string) $input['api_key'] : null;
+        $pullZoneId = ! empty($input['pull_zone_id']) ? (int) $input['pull_zone_id'] : null;
 
         if (! empty($input['site_id'])) {
             /** @var Site $site */
             $site = Site::findOrFail($input['site_id']);
             $this->authorize('view', [$site, $site->server]);
 
-            $apiKey = $apiKey ?: BunnyApi::resolveApiKeyForSite($site);
-            $pullZoneId = $pullZoneId ?: data_get($site->type_data, BunnyApi::TYPE_DATA_KEY.'.pull_zone_id');
+            $apiKey ??= BunnyApi::resolveApiKeyForSite($site);
+            $pullZoneId ??= ((int) data_get($site->type_data, BunnyApi::TYPE_DATA_KEY.'.'.BunnyApi::KEY_PULL_ZONE_ID)) ?: null;
         }
 
-        $apiKey = $apiKey ?: BunnyApi::connectedDnsProviderKey();
+        // Last resort: a Bunny DNS provider the workflow's user owns, scoped
+        // to the workflow's project or global.
+        $apiKey ??= BunnyApi::providerKey(BunnyApi::findDnsProvider($this->user, $this->workflow->project_id));
 
-        if (empty($apiKey)) {
-            return $this->failure(0, 'No Bunny.net API key available');
+        if ($apiKey === null) {
+            return $this->failure(0, 'No Bunny.net API key available: set api_key, use a site with the Bunny CDN feature set up, or connect a Bunny DNS provider in this project');
         }
 
         try {
