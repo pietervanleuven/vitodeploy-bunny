@@ -220,3 +220,178 @@ test('get domains stops paging when a page claims more items but is empty', func
 
     Http::assertSentCount(1);
 });
+
+function fakeBunnyRecordWrite(): void
+{
+    Http::fake([
+        'api.bunny.net/dnszone/1' => Http::response(bunnyZone(1, 'example.com'), 200),
+        'api.bunny.net/dnszone/1/records' => Http::response(bunnyRecord(42, 0, 'www', '203.0.113.10'), 201),
+        'api.bunny.net/dnszone/1/records/*' => Http::response('', 204),
+    ]);
+}
+
+function sentRecordPayload(): array
+{
+    $payload = [];
+    Http::assertSent(function (Request $request) use (&$payload) {
+        if (in_array($request->method(), ['PUT', 'POST'], true)) {
+            $payload = $request->data();
+
+            return true;
+        }
+
+        return false;
+    });
+
+    return $payload;
+}
+
+test('record types are accepted case-insensitively', function (): void {
+    fakeBunnyRecordWrite();
+
+    $this->dns->createRecord('1', ['type' => 'cname', 'name' => 'www', 'content' => 'example.com.', 'ttl' => 300]);
+
+    expect(sentRecordPayload())->toMatchArray(['Type' => 2, 'Name' => 'www', 'Value' => 'example.com.']);
+});
+
+test('unsupported record types are rejected', function (string $type): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => $type, 'name' => 'www', 'content' => 'x']))
+        ->toThrow(ValidationException::class, 'does not support');
+
+    Http::assertNothingSent();
+})->with(['SOA', 'PULLZONE', 'REDIRECT', 'HTTPS']);
+
+test('a missing record type is rejected', function (): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['name' => 'www', 'content' => 'x']))
+        ->toThrow(ValidationException::class, 'type');
+
+    Http::assertNothingSent();
+});
+
+test('record content is validated per type', function (string $type, string $content, string $message): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => $type, 'name' => 'www', 'content' => $content, 'priority' => $type === 'MX' ? 10 : null]))
+        ->toThrow(ValidationException::class, $message);
+
+    Http::assertNothingSent();
+})->with([
+    'A with hostname' => ['A', 'example.com', 'IPv4'],
+    'A with ipv6' => ['A', '2001:db8::1', 'IPv4'],
+    'AAAA with ipv4' => ['AAAA', '203.0.113.10', 'IPv6'],
+    'CNAME with spaces' => ['CNAME', 'not a host', 'host name'],
+    'CNAME with scheme' => ['CNAME', 'https://example.com', 'host name'],
+    'MX with ip' => ['MX', '203.0.113.10', 'not an IP'],
+    'CNAME with ipv6' => ['CNAME', '2001:db8::1', 'host name'],
+    'NS with underscore label only' => ['NS', 'ns1.example.com/path', 'host name'],
+    'CAA without quotes' => ['CAA', '0 issue letsencrypt.org', 'CAA'],
+    'CAA unknown tag' => ['CAA', '0 issuefoo "letsencrypt.org"', 'CAA'],
+    'empty content' => ['TXT', '   ', 'required'],
+]);
+
+test('valid record content is accepted per type', function (string $type, string $content, ?int $priority): void {
+    fakeBunnyRecordWrite();
+
+    $this->dns->createRecord('1', ['type' => $type, 'name' => 'www', 'content' => $content, 'priority' => $priority]);
+
+    expect(sentRecordPayload()['Value'])->toBe($content);
+})->with([
+    'A' => ['A', '203.0.113.10', null],
+    'AAAA' => ['AAAA', '2001:db8::1', null],
+    'CNAME' => ['CNAME', 'target.example.com', null],
+    'CNAME trailing dot' => ['CNAME', 'target.example.com.', null],
+    'MX' => ['MX', 'mail.example.com', 10],
+    'SRV' => ['SRV', 'sip.example.com', null],
+    'SRV with priority' => ['SRV', 'sip.example.com', 5],
+    'NS' => ['NS', 'ns1.example.com', null],
+    'PTR' => ['PTR', 'host.example.com', null],
+    'CAA' => ['CAA', '0 issue "letsencrypt.org"', null],
+    'TXT' => ['TXT', 'v=spf1 include:_spf.example.com ~all', null],
+    'DKIM label' => ['CNAME', 'dkim._domainkey.example.com', null],
+]);
+
+test('ttl must be within range', function (mixed $ttl): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => 'A', 'name' => 'www', 'content' => '203.0.113.10', 'ttl' => $ttl]))
+        ->toThrow(ValidationException::class, 'ttl');
+
+    Http::assertNothingSent();
+})->with([0, -5, 86401, 'soon']);
+
+test('a missing ttl defaults to 300 seconds', function (): void {
+    fakeBunnyRecordWrite();
+
+    $this->dns->createRecord('1', ['type' => 'A', 'name' => 'www', 'content' => '203.0.113.10']);
+
+    expect(sentRecordPayload()['Ttl'])->toBe(300);
+});
+
+test('mx records require a priority', function (): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => 'MX', 'name' => '@', 'content' => 'mail.example.com']))
+        ->toThrow(ValidationException::class, 'priority');
+
+    Http::assertNothingSent();
+});
+
+test('mx records send their priority', function (): void {
+    fakeBunnyRecordWrite();
+
+    $this->dns->createRecord('1', ['type' => 'MX', 'name' => '@', 'content' => 'mail.example.com', 'priority' => '20']);
+
+    expect(sentRecordPayload())->toMatchArray(['Type' => 4, 'Name' => '', 'Priority' => 20]);
+});
+
+test('other record types reject a priority', function (): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => 'A', 'name' => 'www', 'content' => '203.0.113.10', 'priority' => 5]))
+        ->toThrow(ValidationException::class, 'priority');
+
+    Http::assertNothingSent();
+});
+
+test('priority must be within range', function (mixed $priority): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => 'MX', 'name' => '@', 'content' => 'mail.example.com', 'priority' => $priority]))
+        ->toThrow(ValidationException::class, 'priority');
+})->with([-1, 65536, 'high']);
+
+test('record names must be present and short', function (mixed $name): void {
+    fakeBunnyRecordWrite();
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => 'A', 'name' => $name, 'content' => '203.0.113.10']))
+        ->toThrow(ValidationException::class, 'name');
+})->with(['', str_repeat('a', 256), [['x']]]);
+
+test('only known keys reach the api payload', function (): void {
+    fakeBunnyRecordWrite();
+
+    $this->dns->createRecord('1', ['type' => 'A', 'name' => 'www', 'content' => '203.0.113.10', 'Weight' => 5, 'Disabled' => true, 'proxied' => true, '_token' => 'x']);
+
+    expect(array_keys(sentRecordPayload()))->toBe(['Type', 'Name', 'Value', 'Ttl']);
+});
+
+test('update record validates the same way and posts to the record', function (): void {
+    fakeBunnyRecordWrite();
+
+    $record = $this->dns->updateRecord('1', '42', ['type' => 'a', 'name' => 'www.example.com', 'content' => '203.0.113.11', 'ttl' => 600]);
+
+    expect($record)->toMatchArray(['id' => '42', 'type' => 'a', 'content' => '203.0.113.11', 'ttl' => 600]);
+
+    Http::assertSent(fn (Request $request) => $request->method() === 'POST'
+        && str_ends_with($request->url(), '/dnszone/1/records/42')
+        && $request['Type'] === 0
+        && $request['Name'] === 'www'
+        && $request['Ttl'] === 600);
+
+    expect(fn () => $this->dns->updateRecord('1', '42', ['type' => 'A', 'name' => 'www', 'content' => 'nope']))
+        ->toThrow(ValidationException::class, 'IPv4');
+});

@@ -6,6 +6,8 @@ use App\DNSProviders\AbstractDNSProvider;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -22,6 +24,25 @@ class Bunny extends AbstractDNSProvider
      * Safety cap so a misbehaving API can never keep us paging forever.
      */
     private const int MAX_ZONE_PAGES = 100;
+
+    /**
+     * Record types that can be managed from Vito. Bunny-specific types
+     * (Redirect, PullZone, Script, ...) must be managed in the Bunny dashboard.
+     *
+     * @var array<int, string>
+     */
+    private const array SUPPORTED_TYPES = ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'SRV', 'NS', 'CAA', 'PTR'];
+
+    /**
+     * RFC 1123 host name (underscores allowed for service labels), with an
+     * optional trailing dot.
+     */
+    private const string HOSTNAME_PATTERN = '/^(?=.{1,253}$)(?:[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.)*[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?\.?$/i';
+
+    /**
+     * CAA record content: flags, tag and a quoted value.
+     */
+    private const string CAA_PATTERN = '/^\d{1,3}\s+(issue|issuewild|iodef)\s+"[^"]*"$/';
 
     /**
      * Bunny's API represents record types as integers.
@@ -372,24 +393,94 @@ class Bunny extends AbstractDNSProvider
      */
     private function buildPayload(string $domainId, array $input): array
     {
-        $type = array_search(strtoupper($input['type']), self::RECORD_TYPES);
-
-        if ($type === false || ! in_array($input['type'], ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'SRV', 'NS', 'CAA', 'PTR'])) {
-            throw ValidationException::withMessages(['record' => "Bunny DNS does not support {$input['type']} records"]);
-        }
+        $record = $this->validateRecord($input);
+        $type = array_search($record['type'], self::RECORD_TYPES, true);
 
         $payload = [
             'Type' => $type,
-            'Name' => $this->normalizeRecordName($domainId, $input['name']),
-            'Value' => $input['content'],
-            'Ttl' => (int) ($input['ttl'] ?? 300),
+            'Name' => $this->normalizeRecordName($domainId, $record['name']),
+            'Value' => $record['content'],
+            'Ttl' => $record['ttl'] ?? 300,
         ];
 
-        if (isset($input['priority'])) {
-            $payload['Priority'] = (int) $input['priority'];
+        if ($record['priority'] !== null) {
+            $payload['Priority'] = $record['priority'];
         }
 
         return $payload;
+    }
+
+    /**
+     * Validate the record input Vito hands us. Core only checks generic
+     * shape (and forwards every request key), so the record-specific
+     * rules live here.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array{type: string, name: string, content: string, ttl: ?int, priority: ?int}
+     *
+     * @throws ValidationException
+     */
+    private function validateRecord(array $input): array
+    {
+        $type = strtoupper(trim((string) ($input['type'] ?? '')));
+
+        $data = [
+            'type' => $type,
+            'name' => $input['name'] ?? null,
+            'content' => is_string($input['content'] ?? null) ? trim($input['content']) : ($input['content'] ?? null),
+            'ttl' => ($input['ttl'] ?? null) === '' ? null : ($input['ttl'] ?? null),
+            'priority' => ($input['priority'] ?? null) === '' ? null : ($input['priority'] ?? null),
+        ];
+
+        $validated = Validator::make($data, [
+            'type' => ['required', Rule::in(self::SUPPORTED_TYPES)],
+            'name' => ['required', 'string', 'max:255'],
+            'content' => ['required', 'string', 'max:4096', ...$this->contentRules($type)],
+            'ttl' => ['nullable', 'integer', 'min:1', 'max:86400'],
+            'priority' => match ($type) {
+                'MX' => ['required', 'integer', 'min:0', 'max:65535'],
+                'SRV' => ['nullable', 'integer', 'min:0', 'max:65535'],
+                default => ['prohibited'],
+            },
+        ], [
+            'type.in' => 'Bunny DNS does not support :input records.',
+            'content.ipv4' => 'The content of an A record must be an IPv4 address.',
+            'content.ipv6' => 'The content of an AAAA record must be an IPv6 address.',
+            'content.regex' => $type === 'CAA'
+                ? 'The content of a CAA record must look like: 0 issue "letsencrypt.org".'
+                : 'The content of a :attribute must be a valid host name.',
+            'priority.required' => 'MX records require a priority.',
+            'priority.prohibited' => 'Only MX and SRV records accept a priority.',
+        ])->validate();
+
+        return [
+            'type' => $type,
+            'name' => (string) $validated['name'],
+            'content' => (string) $validated['content'],
+            'ttl' => isset($validated['ttl']) ? (int) $validated['ttl'] : null,
+            'priority' => isset($validated['priority']) ? (int) $validated['priority'] : null,
+        ];
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function contentRules(string $type): array
+    {
+        return match ($type) {
+            'A' => ['ipv4'],
+            'AAAA' => ['ipv6'],
+            'CNAME', 'NS', 'PTR', 'MX', 'SRV' => [
+                'regex:'.self::HOSTNAME_PATTERN,
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (filter_var($value, FILTER_VALIDATE_IP) !== false) {
+                        $fail('The content of a :attribute must be a host name, not an IP address.');
+                    }
+                },
+            ],
+            'CAA' => ['regex:'.self::CAA_PATTERN],
+            default => [],
+        };
     }
 
     /**
