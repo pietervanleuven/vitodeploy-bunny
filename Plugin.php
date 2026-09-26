@@ -4,6 +4,7 @@ namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny;
 
 use App\DTOs\DynamicField;
 use App\DTOs\DynamicForm;
+use App\Models\BackupFile;
 use App\Plugins\AbstractPlugin;
 use App\Plugins\RegisterDNSProvider;
 use App\Plugins\RegisterSiteFeature;
@@ -12,6 +13,7 @@ use App\Plugins\RegisterStorageProvider;
 use App\Plugins\RegisterViews;
 use App\Plugins\RegisterWorkflowAction;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\DNSProviders\Bunny as BunnyDNS;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Listeners\DeleteRemoteBackupFile;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SiteFeatures\Cdn\PurgeCache as PurgeCacheAction;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SiteFeatures\Cdn\Remove as RemoveAction;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SiteFeatures\Cdn\Setup as SetupAction;
@@ -36,6 +38,16 @@ class Plugin extends AbstractPlugin
         $this->registerStorageProvider();
         $this->registerCdnSiteFeature();
         $this->registerWorkflowActions();
+        $this->registerBackupFileListener();
+    }
+
+    /**
+     * Vito core cannot compose remote paths for plugin storage providers, so
+     * remote deletion of Bunny backup files is handled on the model event.
+     */
+    private function registerBackupFileListener(): void
+    {
+        BackupFile::deleting(new DeleteRemoteBackupFile);
     }
 
     private function registerDnsProvider(): void

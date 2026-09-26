@@ -61,11 +61,10 @@ class BunnyStorage extends AbstractStorage
     public function delete(string $src): void
     {
         // Vito core composes remote paths only for its built-in providers and
-        // passes an empty string for plugin providers, so the file cannot be
-        // located; skip instead of failing the whole delete operation.
+        // passes an empty string for plugin providers. The remote file is
+        // removed by Listeners\DeleteRemoteBackupFile on the BackupFile
+        // "deleting" event instead, so there is nothing to do here.
         if (trim($src) === '') {
-            Log::warning('Bunny Storage received an empty path for delete; the remote file was not removed');
-
             return;
         }
 
@@ -84,15 +83,23 @@ class BunnyStorage extends AbstractStorage
     }
 
     /**
-     * Fallback remote path when core passes an empty destination:
-     * the configured path prefix plus the local file name.
+     * The remote path used for a backup file name: the configured path
+     * prefix plus the file name. Used when core passes an empty path, and
+     * by the delete listener to find the file again.
+     */
+    public function remotePath(string $fileName): string
+    {
+        $prefix = trim($this->credentials()['path'], '/');
+
+        return $prefix === '' ? $fileName : $prefix.'/'.$fileName;
+    }
+
+    /**
+     * Fallback remote path when core passes an empty destination.
      */
     private function defaultPath(string $localPath): string
     {
-        $prefix = trim($this->credentials()['path'], '/');
-        $name = basename($localPath);
-
-        return $prefix === '' ? $name : $prefix.'/'.$name;
+        return $this->remotePath(basename($localPath));
     }
 
     /**
