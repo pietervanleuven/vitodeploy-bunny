@@ -15,5 +15,5 @@ parameters:
     paths:
         - .
     excludePaths:
-        - vendor
+        - vendor (?)
         - tests
