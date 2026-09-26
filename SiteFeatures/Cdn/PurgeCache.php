@@ -22,12 +22,20 @@ class PurgeCache extends Action
 
     public function handle(Request $request): void
     {
-        $pullZoneId = data_get($this->site->type_data, BunnyApi::TYPE_DATA_KEY.'.pull_zone_id');
+        $pullZoneId = (int) data_get($this->site->type_data, BunnyApi::TYPE_DATA_KEY.'.'.BunnyApi::KEY_PULL_ZONE_ID);
+
+        // active() only drives the UI; the action can still be posted to.
+        if ($pullZoneId < 1) {
+            throw ValidationException::withMessages([
+                'purge' => 'Bunny CDN is not set up for this site.',
+            ]);
+        }
+
         $apiKey = BunnyApi::resolveApiKeyForSite($this->site);
 
-        if (empty($apiKey)) {
+        if ($apiKey === null) {
             throw ValidationException::withMessages([
-                'purge' => 'No API key found. Re-run Setup or connect a Bunny DNS provider.',
+                'purge' => 'No API key found. Re-run Setup or reconnect the linked Bunny DNS provider.',
             ]);
         }
 

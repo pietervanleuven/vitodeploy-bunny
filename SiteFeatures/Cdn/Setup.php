@@ -33,27 +33,34 @@ class Setup extends Action
             DynamicField::make('api_key')
                 ->passwordWithToggle()
                 ->label('API Key')
-                ->description('Leave empty to use the API key of your connected Bunny DNS provider. If provided, the key is stored unencrypted in Vito\'s database.'),
+                ->description('Leave empty to link your connected Bunny DNS provider and reuse its API key (recommended). A key entered here is stored encrypted.'),
         ]);
     }
 
     public function handle(Request $request): void
     {
-        Validator::make($request->all(), [
-            'pull_zone_id' => 'required|integer',
-            'api_key' => 'nullable|string',
+        $input = Validator::make($request->only(['pull_zone_id', 'api_key']), [
+            'pull_zone_id' => ['required', 'integer', 'min:1'],
+            'api_key' => ['nullable', 'string', 'max:255'],
         ])->validate();
 
-        $apiKey = $request->input('api_key') ?: BunnyApi::resolveApiKeyForSite($this->site);
+        $pullZoneId = (int) $input['pull_zone_id'];
+        $apiKey = isset($input['api_key']) && $input['api_key'] !== '' ? (string) $input['api_key'] : null;
+        $dnsProvider = null;
 
-        if (empty($apiKey)) {
+        if ($apiKey === null) {
+            $dnsProvider = BunnyApi::findDnsProvider(user(), $this->site->server->project_id);
+            $apiKey = BunnyApi::providerKey($dnsProvider);
+        }
+
+        if ($apiKey === null) {
             throw ValidationException::withMessages([
-                'api_key' => 'No API key provided and no connected Bunny DNS provider found to borrow one from.',
+                'api_key' => 'No API key provided and no connected Bunny DNS provider found in this project to borrow one from.',
             ]);
         }
 
         try {
-            $response = BunnyApi::client($apiKey)->get('pullzone/'.$request->integer('pull_zone_id'));
+            $response = BunnyApi::client($apiKey)->get('pullzone/'.$pullZoneId);
         } catch (ConnectionException) {
             throw ValidationException::withMessages([
                 'pull_zone_id' => 'Could not reach the Bunny API. Please try again later.',
@@ -66,12 +73,16 @@ class Setup extends Action
             ]);
         }
 
+        // Replace the whole entry: an explicit key is stored encrypted, a
+        // borrowed key is stored as a reference to its DNS provider, and any
+        // legacy plain-text key is dropped.
         $typeData = $this->site->type_data ?? [];
-        data_set($typeData, BunnyApi::TYPE_DATA_KEY, array_filter([
-            'pull_zone_id' => $request->integer('pull_zone_id'),
-            'pull_zone_name' => $response->json('Name'),
-            'api_key' => $request->input('api_key'),
-        ]));
+        $typeData[BunnyApi::TYPE_DATA_KEY] = array_filter([
+            BunnyApi::KEY_PULL_ZONE_ID => $pullZoneId,
+            BunnyApi::KEY_PULL_ZONE_NAME => $response->json('Name'),
+            BunnyApi::KEY_DNS_PROVIDER_ID => $dnsProvider?->id,
+            BunnyApi::KEY_API_KEY_ENCRYPTED => $dnsProvider === null ? BunnyApi::encryptApiKey($apiKey) : null,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
         $this->site->type_data = $typeData;
         $this->site->save();
 

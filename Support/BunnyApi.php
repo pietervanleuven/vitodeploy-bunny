@@ -4,16 +4,45 @@ namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support;
 
 use App\Models\DNSProvider;
 use App\Models\Site;
+use App\Models\User;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\DNSProviders\Bunny as BunnyDNS;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class BunnyApi
 {
+    /**
+     * Key under Site::$type_data holding the CDN feature data. Note that
+     * type_data is stored as plain JSON and sent to the frontend, so only
+     * encrypted secrets or references may be kept there.
+     */
     public const string TYPE_DATA_KEY = 'bunny_cdn';
+
+    public const string KEY_PULL_ZONE_ID = 'pull_zone_id';
+
+    public const string KEY_PULL_ZONE_NAME = 'pull_zone_name';
+
+    /**
+     * ID of the Bunny DNS provider whose (encrypted) API key is reused.
+     */
+    public const string KEY_DNS_PROVIDER_ID = 'dns_provider_id';
+
+    /**
+     * An API key entered for the site, encrypted with the application key.
+     */
+    public const string KEY_API_KEY_ENCRYPTED = 'api_key_encrypted';
+
+    /**
+     * Plain-text key written by earlier plugin versions. Still honoured for
+     * reading; replaced as soon as Setup is run again.
+     */
+    public const string KEY_LEGACY_API_KEY = 'api_key';
 
     public const string API_BASE_URL = 'https://api.bunny.net/';
 
@@ -102,18 +131,83 @@ class BunnyApi
     }
 
     /**
-     * The API key saved on the site itself, or the one from a connected
-     * Bunny DNS provider (stored encrypted) in the site's project.
+     * The API key configured for a site's CDN feature: the encrypted key
+     * saved on the site, a legacy plain-text key, or the key of the Bunny
+     * DNS provider linked during Setup.
      */
     public static function resolveApiKeyForSite(Site $site): ?string
     {
-        $apiKey = data_get($site->type_data, self::TYPE_DATA_KEY.'.api_key');
+        $data = data_get($site->type_data, self::TYPE_DATA_KEY);
+        $data = is_array($data) ? $data : [];
 
-        if (! empty($apiKey)) {
-            return $apiKey;
+        $encrypted = $data[self::KEY_API_KEY_ENCRYPTED] ?? null;
+
+        if (is_string($encrypted) && $encrypted !== '') {
+            try {
+                return Crypt::decryptString($encrypted);
+            } catch (DecryptException) {
+                Log::warning('Bunny CDN: the stored API key could not be decrypted; re-run Setup', ['site_id' => $site->id]);
+            }
         }
 
-        return self::connectedDnsProviderKey($site->server->project_id);
+        $legacy = $data[self::KEY_LEGACY_API_KEY] ?? null;
+
+        if (is_string($legacy) && $legacy !== '') {
+            return $legacy;
+        }
+
+        $dnsProviderId = $data[self::KEY_DNS_PROVIDER_ID] ?? null;
+
+        if (is_int($dnsProviderId) || (is_string($dnsProviderId) && ctype_digit($dnsProviderId))) {
+            /** @var ?DNSProvider $dnsProvider */
+            $dnsProvider = DNSProvider::query()
+                ->whereKey((int) $dnsProviderId)
+                ->where('provider', BunnyDNS::id())
+                ->where('connected', true)
+                ->first();
+
+            return self::providerKey($dnsProvider);
+        }
+
+        return null;
+    }
+
+    /**
+     * The connected Bunny DNS provider a user may use for a project: one
+     * scoped to that project first, otherwise one of the user's global
+     * providers. Mirrors DNSProviderPolicy::view (owner + project scope).
+     */
+    public static function findDnsProvider(User $user, ?int $projectId): ?DNSProvider
+    {
+        /** @var ?DNSProvider $dnsProvider */
+        $dnsProvider = DNSProvider::query()
+            ->where('user_id', $user->id)
+            ->where('provider', BunnyDNS::id())
+            ->where('connected', true)
+            ->where(function ($query) use ($projectId): void {
+                $query->whereNull('project_id');
+
+                if ($projectId !== null) {
+                    $query->orWhere('project_id', $projectId);
+                }
+            })
+            ->orderByRaw('project_id IS NULL')
+            ->orderBy('id')
+            ->first();
+
+        return $dnsProvider;
+    }
+
+    public static function providerKey(?DNSProvider $dnsProvider): ?string
+    {
+        $key = $dnsProvider?->credentials['api_key'] ?? null;
+
+        return is_string($key) && $key !== '' ? $key : null;
+    }
+
+    public static function encryptApiKey(string $apiKey): string
+    {
+        return Crypt::encryptString($apiKey);
     }
 
     public static function connectedDnsProviderKey(?int $projectId = null): ?string
