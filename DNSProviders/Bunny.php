@@ -3,8 +3,8 @@
 namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\DNSProviders;
 
 use App\DNSProviders\AbstractDNSProvider;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
 use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -13,8 +13,6 @@ use Throwable;
 
 class Bunny extends AbstractDNSProvider
 {
-    private const string API_BASE_URL = 'https://api.bunny.net/';
-
     /**
      * Bunny's maximum page size for zone listings.
      */
@@ -110,11 +108,7 @@ class Bunny extends AbstractDNSProvider
     public function connect(array $credentials): bool
     {
         try {
-            $response = Http::withHeaders([
-                'AccessKey' => $credentials['api_key'],
-                'Accept' => 'application/json',
-            ])
-                ->baseUrl(self::API_BASE_URL)
+            $response = BunnyApi::client((string) ($credentials['api_key'] ?? ''))
                 ->get('dnszone', ['page' => 1, 'perPage' => 5]);
 
             if ($response->successful()) {
@@ -304,10 +298,7 @@ class Bunny extends AbstractDNSProvider
 
     private function getClient(): PendingRequest
     {
-        return Http::withHeaders([
-            'AccessKey' => $this->dnsProvider->credentials['api_key'],
-            'Accept' => 'application/json',
-        ])->baseUrl(self::API_BASE_URL);
+        return BunnyApi::client((string) ($this->dnsProvider->credentials['api_key'] ?? ''));
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SiteFeatures\Cdn;
 
 use App\SiteFeatures\Action;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -30,7 +31,13 @@ class PurgeCache extends Action
             ]);
         }
 
-        $response = BunnyApi::client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
+        try {
+            $response = BunnyApi::client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
+        } catch (ConnectionException) {
+            throw ValidationException::withMessages([
+                'purge' => 'Could not reach the Bunny API. Please try again later.',
+            ]);
+        }
 
         if (! $response->successful()) {
             throw ValidationException::withMessages([

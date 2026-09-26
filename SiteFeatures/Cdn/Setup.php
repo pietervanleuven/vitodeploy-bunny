@@ -6,6 +6,7 @@ use App\DTOs\DynamicField;
 use App\DTOs\DynamicForm;
 use App\SiteFeatures\Action;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -51,7 +52,13 @@ class Setup extends Action
             ]);
         }
 
-        $response = BunnyApi::client($apiKey)->get('pullzone/'.$request->integer('pull_zone_id'));
+        try {
+            $response = BunnyApi::client($apiKey)->get('pullzone/'.$request->integer('pull_zone_id'));
+        } catch (ConnectionException) {
+            throw ValidationException::withMessages([
+                'pull_zone_id' => 'Could not reach the Bunny API. Please try again later.',
+            ]);
+        }
 
         if (! $response->successful()) {
             throw ValidationException::withMessages([

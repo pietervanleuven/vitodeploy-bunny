@@ -5,6 +5,7 @@ namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\WorkflowActions;
 use App\Models\Site;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
 use App\WorkflowActions\AbstractWorkflowAction;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Validator;
 
 class PurgeCache extends AbstractWorkflowAction
@@ -55,26 +56,30 @@ class PurgeCache extends AbstractWorkflowAction
             return $this->failure(0, 'No Bunny.net API key available');
         }
 
-        if (! empty($input['url'])) {
-            $response = BunnyApi::client($apiKey)->withQueryParameters([
-                'url' => $input['url'],
-                'async' => false,
-            ])->post('purge');
+        try {
+            if (! empty($input['url'])) {
+                $response = BunnyApi::client($apiKey)->withQueryParameters([
+                    'url' => $input['url'],
+                    'async' => false,
+                ])->post('purge');
+
+                return $response->successful()
+                    ? $this->success($response->status(), 'URL purged: '.$input['url'])
+                    : $this->failure($response->status(), 'Failed to purge URL');
+            }
+
+            if (empty($pullZoneId)) {
+                return $this->failure(0, 'No pull zone ID available; set pull_zone_id or use a site with the Bunny CDN feature set up');
+            }
+
+            $response = BunnyApi::client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
 
             return $response->successful()
-                ? $this->success($response->status(), 'URL purged: '.$input['url'])
-                : $this->failure($response->status(), 'Failed to purge URL');
+                ? $this->success($response->status(), "Pull zone {$pullZoneId} cache purged")
+                : $this->failure($response->status(), "Failed to purge pull zone {$pullZoneId}");
+        } catch (ConnectionException) {
+            return $this->failure(0, 'Could not reach the Bunny API');
         }
-
-        if (empty($pullZoneId)) {
-            return $this->failure(0, 'No pull zone ID available; set pull_zone_id or use a site with the Bunny CDN feature set up');
-        }
-
-        $response = BunnyApi::client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
-
-        return $response->successful()
-            ? $this->success($response->status(), "Pull zone {$pullZoneId} cache purged")
-            : $this->failure($response->status(), "Failed to purge pull zone {$pullZoneId}");
     }
 
     /**

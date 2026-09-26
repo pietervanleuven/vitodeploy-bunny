@@ -7,7 +7,7 @@ use App\Models\Server;
 use App\SSH\Storage\Storage;
 use App\StorageProviders\AbstractStorageProvider;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SSH\Storage\BunnyStorage;
-use Illuminate\Support\Facades\Http;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -94,10 +94,8 @@ class Bunny extends AbstractStorageProvider
     public function connect(array $credentials): bool
     {
         try {
-            $response = Http::withHeaders([
-                'AccessKey' => $credentials['access_key'],
-                'Accept' => 'application/json',
-            ])->get(sprintf('https://%s/%s/', $credentials['endpoint'], $credentials['storage_zone']));
+            $response = BunnyApi::storageClient((string) $credentials['endpoint'], (string) $credentials['access_key'])
+                ->get(rawurlencode((string) $credentials['storage_zone']).'/');
 
             if ($response->successful()) {
                 return true;
