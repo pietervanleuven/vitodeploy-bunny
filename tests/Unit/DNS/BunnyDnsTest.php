@@ -6,6 +6,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class, InteractsWithBunnyPlugin::class);
@@ -84,4 +85,94 @@ test('get records throws a runtime exception when the api is unreachable', funct
 
     expect(fn () => $this->dns->getRecords('1'))
         ->toThrow(RuntimeException::class, 'could not reach the Bunny API');
+});
+
+test('get records fails when the payload has no record list', function (mixed $body): void {
+    Http::fake(['api.bunny.net/dnszone/1' => Http::response($body, 200)]);
+
+    expect(fn () => $this->dns->getRecords('1'))
+        ->toThrow(RuntimeException::class, 'unexpected response');
+})->with([
+    'no records key' => [['Id' => 1, 'Domain' => 'example.com']],
+    'records is not a list' => [['Records' => 'nope']],
+    'plain text body' => ['not json'],
+]);
+
+test('get records skips malformed records', function (): void {
+    Http::fake([
+        'api.bunny.net/dnszone/1' => Http::response(bunnyZone(records: [
+            bunnyRecord(10, 0, '', '203.0.113.10'),
+            ['Id' => 11, 'Type' => 0],
+            ['Id' => 12, 'Type' => 'A', 'Name' => 'x', 'Value' => 'y', 'Ttl' => 300],
+            'garbage',
+            bunnyRecord(13, 3, 'txt', 'hello'),
+        ]), 200),
+    ]);
+
+    $records = $this->dns->getRecords('1');
+
+    expect(collect($records)->pluck('id')->all())->toBe(['10', '13']);
+});
+
+test('get domains returns an empty list for an unexpected payload', function (mixed $body): void {
+    Http::fake(['api.bunny.net/dnszone*' => Http::response($body, 200)]);
+
+    expect($this->dns->getDomains())->toBe([]);
+})->with([
+    'no items key' => [['TotalItems' => 0]],
+    'items is not a list' => [['Items' => 'nope']],
+    'plain text body' => ['not json'],
+]);
+
+test('get domains skips zones without an id or domain', function (): void {
+    Http::fake([
+        'api.bunny.net/dnszone*' => Http::response(['Items' => [
+            bunnyZone(1, 'one.com'),
+            ['Domain' => 'no-id.com'],
+            ['Id' => 3],
+            bunnyZone(4, 'four.com'),
+        ], 'HasMoreItems' => false], 200),
+    ]);
+
+    expect(collect($this->dns->getDomains())->pluck('name')->all())->toBe(['one.com', 'four.com']);
+});
+
+test('get domain returns an empty array for an unexpected payload', function (): void {
+    Http::fake(['api.bunny.net/dnszone/1' => Http::response(['Message' => 'weird'], 200)]);
+
+    expect($this->dns->getDomain('1'))->toBe([]);
+});
+
+test('get domain formats the zone', function (): void {
+    Http::fake(['api.bunny.net/dnszone/1' => Http::response(bunnyZone(1, 'example.com'), 200)]);
+
+    expect($this->dns->getDomain('1'))->toMatchArray(['id' => '1', 'name' => 'example.com', 'status' => 'active']);
+});
+
+test('create record fails when the response has no record id', function (): void {
+    Http::fake([
+        'api.bunny.net/dnszone/1' => Http::response(bunnyZone(1, 'example.com'), 200),
+        'api.bunny.net/dnszone/1/records' => Http::response(['Message' => 'ok'], 201),
+    ]);
+
+    expect(fn () => $this->dns->createRecord('1', ['type' => 'A', 'name' => 'www', 'content' => '203.0.113.10', 'ttl' => 300]))
+        ->toThrow(ValidationException::class, 'unexpected response');
+});
+
+test('create record returns the created record', function (): void {
+    Http::fake([
+        'api.bunny.net/dnszone/1' => Http::response(bunnyZone(1, 'example.com'), 200),
+        'api.bunny.net/dnszone/1/records' => Http::response(bunnyRecord(42, 0, 'www', '203.0.113.10'), 201),
+    ]);
+
+    $record = $this->dns->createRecord('1', ['type' => 'A', 'name' => 'www.example.com', 'content' => '203.0.113.10', 'ttl' => 300]);
+
+    expect($record)->toMatchArray(['id' => '42', 'type' => 'A', 'name' => 'www', 'content' => '203.0.113.10', 'ttl' => 300]);
+
+    Http::assertSent(fn (Request $request) => $request->method() === 'PUT'
+        && str_ends_with($request->url(), '/dnszone/1/records')
+        && $request['Type'] === 0
+        && $request['Name'] === 'www'
+        && $request['Value'] === '203.0.113.10'
+        && $request['Ttl'] === 300);
 });

@@ -114,7 +114,11 @@ class Bunny extends AbstractDNSProvider
                 return [];
             }
 
-            return collect($response->json('Items'))->map(fn (array $zone): array => $this->formatZone($zone))->toArray();
+            return collect($this->listFrom($response->json(), 'Items', 'zones'))
+                ->map(fn (mixed $zone): ?array => is_array($zone) ? $this->formatZone($zone) : null)
+                ->filter()
+                ->values()
+                ->toArray();
         } catch (Throwable $e) {
             Log::error('Bunny DNS getDomains exception', ['error' => $e->getMessage()]);
 
@@ -133,7 +137,16 @@ class Bunny extends AbstractDNSProvider
                 return [];
             }
 
-            return $this->formatZone($response->json());
+            $zone = $response->json();
+            $formatted = is_array($zone) ? $this->formatZone($zone) : null;
+
+            if ($formatted === null) {
+                Log::warning('Bunny DNS returned an unexpected zone payload', ['domainId' => $domainId]);
+
+                return [];
+            }
+
+            return $formatted;
         } catch (Throwable $e) {
             Log::error('Bunny DNS getDomain exception', ['error' => $e->getMessage()]);
 
@@ -158,21 +171,18 @@ class Bunny extends AbstractDNSProvider
             throw new \RuntimeException('Failed to fetch DNS records: '.$this->errorMessage($response->json()));
         }
 
-        return collect($response->json('Records'))->map(function (array $record): array {
-            $type = self::RECORD_TYPES[$record['Type']] ?? 'UNKNOWN';
+        $zone = $response->json();
 
-            return [
-                'id' => (string) $record['Id'],
-                'type' => $type,
-                'name' => $record['Name'] === '' ? '@' : $record['Name'],
-                'content' => $record['Value'],
-                'ttl' => $record['Ttl'],
-                'proxied' => (bool) ($record['Accelerated'] ?? false),
-                'priority' => in_array($type, ['MX', 'SRV']) ? ($record['Priority'] ?? null) : null,
-                'created_on' => null,
-                'modified_on' => null,
-            ];
-        })->toArray();
+        if (! is_array($zone) || ! isset($zone['Records']) || ! is_array($zone['Records'])) {
+            Log::error('Bunny DNS returned an unexpected records payload', ['domainId' => $domainId]);
+            throw new \RuntimeException('Failed to fetch DNS records: unexpected response from the Bunny API');
+        }
+
+        return collect($zone['Records'])
+            ->map(fn (mixed $record): ?array => is_array($record) ? $this->formatRecord($record) : null)
+            ->filter()
+            ->values()
+            ->toArray();
     }
 
     public function createRecord(string $domainId, array $recordData): array
@@ -186,13 +196,19 @@ class Bunny extends AbstractDNSProvider
             }
 
             $record = $response->json();
+            $formatted = is_array($record) ? $this->formatRecord($record) : null;
+
+            if ($formatted === null) {
+                Log::error('Bunny DNS returned an unexpected record payload', ['domainId' => $domainId]);
+                throw ValidationException::withMessages(['record' => 'Failed to create DNS record: unexpected response from the Bunny API']);
+            }
 
             return [
-                'id' => (string) $record['Id'],
+                'id' => $formatted['id'],
                 'type' => $recordData['type'],
-                'name' => $record['Name'] === '' ? '@' : $record['Name'],
-                'content' => $record['Value'],
-                'ttl' => $record['Ttl'],
+                'name' => $formatted['name'],
+                'content' => $formatted['content'],
+                'ttl' => $formatted['ttl'],
             ];
         } catch (ValidationException $e) {
             throw $e;
@@ -255,11 +271,34 @@ class Bunny extends AbstractDNSProvider
     }
 
     /**
-     * @param  array<string, mixed>  $zone
-     * @return array<string, mixed>
+     * The list under $key of a paginated Bunny response, or an empty list
+     * when the payload does not have the expected shape.
+     *
+     * @return array<mixed>
      */
-    private function formatZone(array $zone): array
+    private function listFrom(mixed $json, string $key, string $context): array
     {
+        if (! is_array($json) || ! isset($json[$key]) || ! is_array($json[$key])) {
+            Log::warning("Bunny DNS returned an unexpected {$context} payload", ['missing' => $key]);
+
+            return [];
+        }
+
+        return array_values($json[$key]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $zone
+     * @return ?array<string, mixed> null when required keys are missing
+     */
+    private function formatZone(array $zone): ?array
+    {
+        if (! $this->isId($zone['Id'] ?? null) || ! is_string($zone['Domain'] ?? null)) {
+            Log::warning('Bunny DNS zone is missing required fields', ['keys' => array_keys($zone)]);
+
+            return null;
+        }
+
         return [
             'id' => (string) $zone['Id'],
             'name' => $zone['Domain'],
@@ -267,6 +306,45 @@ class Bunny extends AbstractDNSProvider
             'created_on' => $zone['DateCreated'] ?? null,
             'modified_on' => $zone['DateModified'] ?? null,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $record
+     * @return ?array<string, mixed> null when required keys are missing
+     */
+    private function formatRecord(array $record): ?array
+    {
+        if (
+            ! $this->isId($record['Id'] ?? null)
+            || ! is_int($record['Type'] ?? null)
+            || ! is_string($record['Name'] ?? null)
+            || ! is_string($record['Value'] ?? null)
+            || ! is_int($record['Ttl'] ?? null)
+        ) {
+            Log::warning('Bunny DNS record is missing required fields', ['keys' => array_keys($record)]);
+
+            return null;
+        }
+
+        $type = self::RECORD_TYPES[$record['Type']] ?? 'UNKNOWN';
+        $priority = $record['Priority'] ?? null;
+
+        return [
+            'id' => (string) $record['Id'],
+            'type' => $type,
+            'name' => $record['Name'] === '' ? '@' : $record['Name'],
+            'content' => $record['Value'],
+            'ttl' => $record['Ttl'],
+            'proxied' => (bool) ($record['Accelerated'] ?? false),
+            'priority' => in_array($type, ['MX', 'SRV']) && is_int($priority) ? $priority : null,
+            'created_on' => null,
+            'modified_on' => null,
+        ];
+    }
+
+    private function isId(mixed $value): bool
+    {
+        return is_int($value) || (is_string($value) && $value !== '');
     }
 
     /**
