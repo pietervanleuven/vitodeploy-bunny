@@ -153,7 +153,7 @@ touch .env && php artisan key:generate && touch storage/database-test.sqlite
 # Copy (or symlink) this repository into the plugins directory
 rsync -a --exclude .git --exclude vendor /path/to/vitodeploy-bunny/ app/Vito/Plugins/Pietervanleuven/VitodeployBunny/
 
-php artisan test app/Vito/Plugins/Pietervanleuven/VitodeployBunny/tests
+php artisan test --bootstrap=app/Vito/Plugins/Pietervanleuven/VitodeployBunny/tests/bootstrap.php app/Vito/Plugins/Pietervanleuven/VitodeployBunny/tests
 ./vendor/bin/phpstan analyse -c app/Vito/Plugins/Pietervanleuven/VitodeployBunny/phpstan.neon
 ```
 

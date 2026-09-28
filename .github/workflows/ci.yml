@@ -93,7 +93,7 @@ jobs:
 
       - name: Run tests
         working-directory: vito
-        run: php artisan test "${PLUGIN_PATH}/tests"
+        run: php artisan test --bootstrap="${PLUGIN_PATH}/tests/bootstrap.php" "${PLUGIN_PATH}/tests"
 
   workflows:
     name: Workflows (actionlint)
