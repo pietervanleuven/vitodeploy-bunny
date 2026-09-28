@@ -6,8 +6,8 @@ use App\DTOs\DynamicField;
 use App\Models\Server;
 use App\SSH\Storage\Storage;
 use App\StorageProviders\AbstractStorageProvider;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyApi;
 use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SSH\Storage\BunnyStorage;
-use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -94,7 +94,7 @@ class Bunny extends AbstractStorageProvider
     public function connect(array $credentials): bool
     {
         try {
-            $response = BunnyApi::storageClient((string) $credentials['endpoint'], (string) $credentials['access_key'])
+            $response = app(BunnyApi::class)->storageClient((string) $credentials['endpoint'], (string) $credentials['access_key'])
                 ->get(rawurlencode((string) $credentials['storage_zone']).'/');
 
             if ($response->successful()) {

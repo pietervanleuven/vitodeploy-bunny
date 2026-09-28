@@ -5,7 +5,8 @@ namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SiteFeatures\Cdn;
 use App\DTOs\DynamicField;
 use App\DTOs\DynamicForm;
 use App\SiteFeatures\Action;
-use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyCredentialResolver;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -20,7 +21,7 @@ class Setup extends Action
 
     public function active(): bool
     {
-        return empty(data_get($this->site->type_data, BunnyApi::TYPE_DATA_KEY.'.pull_zone_id'));
+        return empty(data_get($this->site->type_data, BunnyCredentialResolver::TYPE_DATA_KEY.'.pull_zone_id'));
     }
 
     public function form(): ?DynamicForm
@@ -49,8 +50,9 @@ class Setup extends Action
         $dnsProvider = null;
 
         if ($apiKey === null) {
-            $dnsProvider = BunnyApi::findDnsProvider(user(), $this->site->server->project_id);
-            $apiKey = BunnyApi::providerKey($dnsProvider);
+            $credentials = app(BunnyCredentialResolver::class);
+            $dnsProvider = $credentials->findDnsProvider(user(), $this->site->server->project_id);
+            $apiKey = $credentials->providerKey($dnsProvider);
         }
 
         if ($apiKey === null) {
@@ -60,7 +62,7 @@ class Setup extends Action
         }
 
         try {
-            $response = BunnyApi::client($apiKey)->get('pullzone/'.$pullZoneId);
+            $response = app(BunnyApi::class)->client($apiKey)->get('pullzone/'.$pullZoneId);
         } catch (ConnectionException) {
             throw ValidationException::withMessages([
                 'pull_zone_id' => 'Could not reach the Bunny API. Please try again later.',
@@ -77,11 +79,11 @@ class Setup extends Action
         // borrowed key is stored as a reference to its DNS provider, and any
         // legacy plain-text key is dropped.
         $typeData = $this->site->type_data ?? [];
-        $typeData[BunnyApi::TYPE_DATA_KEY] = array_filter([
-            BunnyApi::KEY_PULL_ZONE_ID => $pullZoneId,
-            BunnyApi::KEY_PULL_ZONE_NAME => $response->json('Name'),
-            BunnyApi::KEY_DNS_PROVIDER_ID => $dnsProvider?->id,
-            BunnyApi::KEY_API_KEY_ENCRYPTED => $dnsProvider === null ? BunnyApi::encryptApiKey($apiKey) : null,
+        $typeData[BunnyCredentialResolver::TYPE_DATA_KEY] = array_filter([
+            BunnyCredentialResolver::KEY_PULL_ZONE_ID => $pullZoneId,
+            BunnyCredentialResolver::KEY_PULL_ZONE_NAME => $response->json('Name'),
+            BunnyCredentialResolver::KEY_DNS_PROVIDER_ID => $dnsProvider?->id,
+            BunnyCredentialResolver::KEY_API_KEY_ENCRYPTED => $dnsProvider === null ? app(BunnyCredentialResolver::class)->encryptApiKey($apiKey) : null,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
         $this->site->type_data = $typeData;
         $this->site->save();

@@ -3,7 +3,8 @@
 namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\SiteFeatures\Cdn;
 
 use App\SiteFeatures\Action;
-use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyCredentialResolver;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -17,12 +18,12 @@ class PurgeCache extends Action
 
     public function active(): bool
     {
-        return ! empty(data_get($this->site->type_data, BunnyApi::TYPE_DATA_KEY.'.pull_zone_id'));
+        return ! empty(data_get($this->site->type_data, BunnyCredentialResolver::TYPE_DATA_KEY.'.pull_zone_id'));
     }
 
     public function handle(Request $request): void
     {
-        $pullZoneId = (int) data_get($this->site->type_data, BunnyApi::TYPE_DATA_KEY.'.'.BunnyApi::KEY_PULL_ZONE_ID);
+        $pullZoneId = (int) data_get($this->site->type_data, BunnyCredentialResolver::TYPE_DATA_KEY.'.'.BunnyCredentialResolver::KEY_PULL_ZONE_ID);
 
         // active() only drives the UI; the action can still be posted to.
         if ($pullZoneId < 1) {
@@ -31,7 +32,7 @@ class PurgeCache extends Action
             ]);
         }
 
-        $apiKey = BunnyApi::resolveApiKeyForSite($this->site);
+        $apiKey = app(BunnyCredentialResolver::class)->resolveApiKeyForSite($this->site);
 
         if ($apiKey === null) {
             throw ValidationException::withMessages([
@@ -40,7 +41,7 @@ class PurgeCache extends Action
         }
 
         try {
-            $response = BunnyApi::client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
+            $response = app(BunnyApi::class)->client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
         } catch (ConnectionException) {
             throw ValidationException::withMessages([
                 'purge' => 'Could not reach the Bunny API. Please try again later.',

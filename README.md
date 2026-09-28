@@ -127,9 +127,9 @@ Outputs: `success`, `status_code`, `message`.
 | CDN feature: explicit API key       | `sites.type_data.bunny_cdn.api_key_encrypted` | Encrypted with `APP_KEY`                                                   |
 
 Keep in mind that `sites.type_data` is plain JSON that Vito shows to every member of the project
-and returns from its API, which is why the plugin never writes a plain-text key there. Keys stored
-in plain text by plugin versions before 0.1.0 keep working and are replaced the next time Setup is
-run for the site.
+and returns from its API, which is why the plugin never writes a plain-text key there. Sites
+configured by plugin versions before 0.1.0 must be run through Setup again before cache purging
+will work; legacy plain-text keys are intentionally no longer read.
 
 All Bunny API requests use a 10 second connection timeout, a 30 second request timeout and retry
 safe (`GET`/`HEAD`/`DELETE`) requests up to three times on connection errors, `429` and `5xx`

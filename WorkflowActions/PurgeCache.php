@@ -3,7 +3,8 @@
 namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\WorkflowActions;
 
 use App\Models\Site;
-use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyCredentialResolver;
 use App\WorkflowActions\AbstractWorkflowAction;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
@@ -51,13 +52,15 @@ class PurgeCache extends AbstractWorkflowAction
             $site = Site::findOrFail($input['site_id']);
             $this->authorize('view', [$site, $site->server]);
 
-            $apiKey ??= BunnyApi::resolveApiKeyForSite($site);
-            $pullZoneId ??= ((int) data_get($site->type_data, BunnyApi::TYPE_DATA_KEY.'.'.BunnyApi::KEY_PULL_ZONE_ID)) ?: null;
+            $credentials = app(BunnyCredentialResolver::class);
+            $apiKey ??= $credentials->resolveApiKeyForSite($site);
+            $pullZoneId ??= ((int) data_get($site->type_data, BunnyCredentialResolver::TYPE_DATA_KEY.'.'.BunnyCredentialResolver::KEY_PULL_ZONE_ID)) ?: null;
         }
 
         // Last resort: a Bunny DNS provider the workflow's user owns, scoped
         // to the workflow's project or global.
-        $apiKey ??= BunnyApi::providerKey(BunnyApi::findDnsProvider($this->user, $this->workflow->project_id));
+        $credentials ??= app(BunnyCredentialResolver::class);
+        $apiKey ??= $credentials->providerKey($credentials->findDnsProvider($this->user, $this->workflow->project_id));
 
         if ($apiKey === null) {
             return $this->failure(0, 'No Bunny.net API key available: set api_key, use a site with the Bunny CDN feature set up, or connect a Bunny DNS provider in this project');
@@ -65,7 +68,7 @@ class PurgeCache extends AbstractWorkflowAction
 
         try {
             if (! empty($input['url'])) {
-                $response = BunnyApi::client($apiKey)->withQueryParameters([
+                $response = app(BunnyApi::class)->client($apiKey)->withQueryParameters([
                     'url' => $input['url'],
                     'async' => false,
                 ])->post('purge');
@@ -79,7 +82,7 @@ class PurgeCache extends AbstractWorkflowAction
                 return $this->failure(0, 'No pull zone ID available; set pull_zone_id or use a site with the Bunny CDN feature set up');
             }
 
-            $response = BunnyApi::client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
+            $response = app(BunnyApi::class)->client($apiKey)->post("pullzone/{$pullZoneId}/purgeCache");
 
             return $response->successful()
                 ? $this->success($response->status(), "Pull zone {$pullZoneId} cache purged")

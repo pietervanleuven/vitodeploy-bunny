@@ -3,7 +3,7 @@
 namespace App\Vito\Plugins\Pietervanleuven\VitodeployBunny\DNSProviders;
 
 use App\DNSProviders\AbstractDNSProvider;
-use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Support\BunnyApi;
+use App\Vito\Plugins\Pietervanleuven\VitodeployBunny\Service\BunnyApi;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -108,7 +108,7 @@ class Bunny extends AbstractDNSProvider
     public function connect(array $credentials): bool
     {
         try {
-            $response = BunnyApi::client((string) ($credentials['api_key'] ?? ''))
+            $response = app(BunnyApi::class)->client((string) ($credentials['api_key'] ?? ''))
                 ->get('dnszone', ['page' => 1, 'perPage' => 5]);
 
             if ($response->successful()) {
@@ -298,7 +298,7 @@ class Bunny extends AbstractDNSProvider
 
     private function getClient(): PendingRequest
     {
-        return BunnyApi::client((string) ($this->dnsProvider->credentials['api_key'] ?? ''));
+        return app(BunnyApi::class)->client((string) ($this->dnsProvider->credentials['api_key'] ?? ''));
     }
 
     /**

@@ -188,13 +188,27 @@ test('purge uses the linked dns provider key', function (): void {
     Http::assertSent(fn (Request $request) => $request->header('AccessKey')[0] === 'dns-key');
 });
 
-test('purge still honours a legacy plain-text key', function (): void {
+test('purge refuses a legacy plain-text key', function (): void {
     fakePullZone();
     $this->site->update(['type_data' => ['bunny_cdn' => ['pull_zone_id' => 123, 'api_key' => 'legacy-key']]]);
 
-    $this->post(cdnActionRoute($this, 'purge-cache'))->assertSessionDoesntHaveErrors();
+    $this->post(cdnActionRoute($this, 'purge-cache'))->assertSessionHasErrors(['purge']);
 
-    Http::assertSent(fn (Request $request) => $request->header('AccessKey')[0] === 'legacy-key');
+    Http::assertNothingSent();
+});
+
+test('purge refuses a linked provider from another project or owner', function (): void {
+    fakePullZone();
+    $provider = $this->bunnyDnsProvider(
+        user: User::factory()->create(),
+        projectId: Project::factory()->create()->id,
+        apiKey: 'untrusted-key',
+    );
+    $this->site->update(['type_data' => ['bunny_cdn' => ['pull_zone_id' => 123, 'dns_provider_id' => $provider->id]]]);
+
+    $this->post(cdnActionRoute($this, 'purge-cache'))->assertSessionHasErrors(['purge']);
+
+    Http::assertNothingSent();
 });
 
 test('purge fails when the linked provider is gone', function (): void {
