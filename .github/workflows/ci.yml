@@ -76,6 +76,10 @@ jobs:
           mkdir -p "vito/${PLUGIN_PATH}"
           rsync -a --exclude .git --exclude vendor plugin/ "vito/${PLUGIN_PATH}/"
 
+      - name: Rebuild Composer autoload files
+        working-directory: vito
+        run: composer dump-autoload --no-interaction
+
       - name: Prepare the application
         working-directory: vito
         run: |
