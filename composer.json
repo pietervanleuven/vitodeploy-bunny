@@ -2,7 +2,7 @@
     "$schema": "https://raw.githubusercontent.com/vitodeploy/plugins/main/schema/manifest.schema.json",
     "name": "pietervanleuven/vitodeploy-bunny",
     "description": "Bunny.net integration for VitoDeploy: DNS provider, Edge Storage backups and CDN cache purging",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "vito-plugin",
     "license": "MIT",
     "keywords": [
