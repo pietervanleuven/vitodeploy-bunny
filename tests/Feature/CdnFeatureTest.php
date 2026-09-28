@@ -40,7 +40,7 @@ test('setup reports when the bunny api cannot be reached', function (): void {
 
 test('purge reports when the bunny api cannot be reached', function (): void {
     Http::fake(fn () => throw new ConnectionException('Connection timed out'));
-    $this->site->update(['type_data' => ['bunny_cdn' => ['pull_zone_id' => 123, 'api_key' => 'site-key']]]);
+    $this->site->update(['type_data' => ['bunny_cdn' => ['pull_zone_id' => 123, 'api_key_encrypted' => Crypt::encryptString('site-key')]]]);
 
     $this->post(cdnActionRoute($this, 'purge-cache'))
         ->assertSessionHasErrors(['purge' => 'Could not reach the Bunny API. Please try again later.']);
